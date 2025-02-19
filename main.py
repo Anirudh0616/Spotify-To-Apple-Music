@@ -136,10 +136,10 @@ def sync_songs():
         if song_id:
             success = add_song_to_apple_music(song_id)
             if success:
-                print(f"✅ Added: {song['name']} by {song['artist']} to Apple Music.")
+                print(f"Added: {song['name']} by {song['artist']} to Apple Music.")
             else:
-                print(f"❌ Failed to add: {song['name']} by {song['artist']}.")
+                print(f"Failed to add: {song['name']} by {song['artist']}.")
         else:
-            print(f"🔍 No match found for: {song['name']} by {song['artist']}.")
+            print(f"No match found for: {song['name']} by {song['artist']}.")
 
 sync_songs()
