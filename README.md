@@ -3,7 +3,7 @@ Ever wanted to sync your spotify library to your apple music library, hassle fre
 ---
 # Instructions
 + Change the Spotify ID's in the main.py and the Apple music team ids that you can get from their respective developer portals by logging into your account. They are pretty easy to find with google searches.
-+ Make sure you have Spotipy and jwt installed using pip .
++ Make sure you have Spotipy and jwt installed using pip . <br>
   `pip install spotipy`
   `pip install jwt`
 
