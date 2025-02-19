@@ -3,6 +3,7 @@ from spotipy.oauth2 import SpotifyOAuth
 import requests
 import jwt
 import time
+import json
 
 # Spotify API credentials
 SPOTIFY_CLIENT_ID = "your_spotify_client_id"
@@ -14,7 +15,7 @@ APPLE_MUSIC_TEAM_ID = "your_team_id"
 APPLE_MUSIC_KEY_ID = "your_key_id"
 APPLE_MUSIC_PRIVATE_KEY_PATH = "AuthKey_XXXXXX.p8"  # Path to Apple private key file
 
-# Apple Music User Token (this must be obtained manually from an Apple device)
+# Apple Music User Token (must be obtained manually from an Apple device)
 APPLE_MUSIC_USER_TOKEN = "your_apple_music_user_token"
 
 # Initialize Spotify API
@@ -27,24 +28,37 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
 
 # Generate Apple Music Developer Token
 def generate_apple_music_token():
-    with open(APPLE_MUSIC_PRIVATE_KEY_PATH, "r") as f:
-        private_key = f.read()
+    try:
+        with open(APPLE_MUSIC_PRIVATE_KEY_PATH, "r") as f:
+            private_key = f.read()
 
-    headers = {
-        "alg": "ES256",
-        "kid": APPLE_MUSIC_KEY_ID
-    }
+        headers = {
+            "alg": "ES256",
+            "kid": APPLE_MUSIC_KEY_ID
+        }
 
-    payload = {
-        "iss": APPLE_MUSIC_TEAM_ID,
-        "iat": int(time.time()),
-        "exp": int(time.time()) + 15777000  # Valid for 6 months
-    }
+        payload = {
+            "iss": APPLE_MUSIC_TEAM_ID,
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 15777000  # Valid for ~6 months
+        }
 
-    token = jwt.encode(payload, private_key, algorithm="ES256", headers=headers)
-    return token
+        token = jwt.encode(payload, private_key, algorithm="ES256", headers=headers)
+
+        # Decode for older versions of PyJWT (only needed if jwt.encode() returns bytes)
+        if isinstance(token, bytes):
+            token = token.decode('utf-8')
+
+        return token
+    except Exception as e:
+        print(f"Error generating Apple Music token: {e}")
+        return None
 
 APPLE_MUSIC_DEV_TOKEN = generate_apple_music_token()
+
+if not APPLE_MUSIC_DEV_TOKEN:
+    print("Failed to generate Apple Music token. Exiting.")
+    exit(1)
 
 # Fetch Liked Songs from Spotify
 def get_spotify_liked_songs():
@@ -56,13 +70,14 @@ def get_spotify_liked_songs():
             track = item["track"]
             songs.append({"name": track["name"], "artist": track["artists"][0]["name"]})
         
+        # Get the next page of results
         results = sp.next(results) if results["next"] else None
 
     return songs
 
 # Search for a song in Apple Music
 def search_apple_music(song_name, artist_name):
-    url = f"https://api.music.apple.com/v1/catalog/us/search"
+    url = "https://api.music.apple.com/v1/catalog/us/search"
     headers = {
         "Authorization": f"Bearer {APPLE_MUSIC_DEV_TOKEN}",
         "Music-User-Token": APPLE_MUSIC_USER_TOKEN
@@ -72,10 +87,19 @@ def search_apple_music(song_name, artist_name):
         "types": "songs",
         "limit": 1
     }
-    
+
     response = requests.get(url, headers=headers, params=params)
-    if response.status_code == 200 and response.json()["results"].get("songs"):
-        return response.json()["results"]["songs"]["data"][0]["id"]  # Return first song ID
+
+    if response.status_code == 200:
+        try:
+            data = response.json()
+            if "songs" in data.get("results", {}):
+                return data["results"]["songs"]["data"][0]["id"]
+        except json.JSONDecodeError:
+            print(f"Error parsing Apple Music response for {song_name} by {artist_name}.")
+    else:
+        print(f"Apple Music API error: {response.status_code} - {response.text}")
+
     return None
 
 # Add song to Apple Music Library
@@ -86,21 +110,36 @@ def add_song_to_apple_music(song_id):
         "Music-User-Token": APPLE_MUSIC_USER_TOKEN,
         "Content-Type": "application/json"
     }
-    data = {"ids": [song_id]}
+    data = {
+        "data": [{"id": song_id, "type": "songs"}]  # Correct format for Apple Music API
+    }
 
     response = requests.post(url, headers=headers, json=data)
-    return response.status_code == 202  # 202 means accepted
 
-# Main function
+    if response.status_code == 202:
+        return True
+    else:
+        print(f"Failed to add song {song_id}: {response.status_code} - {response.text}")
+        return False
+
+# Main function to sync Spotify liked songs with Apple Music
 def sync_songs():
+    print("Fetching liked songs from Spotify...")
     spotify_songs = get_spotify_liked_songs()
     print(f"Found {len(spotify_songs)} liked songs on Spotify.")
 
     for song in spotify_songs:
+        print(f"Processing: {song['name']} by {song['artist']}...")
+
+        # Search for the song in Apple Music
         song_id = search_apple_music(song["name"], song["artist"])
         if song_id:
             success = add_song_to_apple_music(song_id)
-            status = "Added" if success else "Failed"
-            print(f"{status}: {song['name']} by {song['artist']}")
+            if success:
+                print(f"✅ Added: {song['name']} by {song['artist']} to Apple Music.")
+            else:
+                print(f"❌ Failed to add: {song['name']} by {song['artist']}.")
         else:
-            print(f"Not found: {song['name']} by song['artist']}")
+            print(f"🔍 No match found for: {song['name']} by {song['artist']}.")
+
+sync_songs()
